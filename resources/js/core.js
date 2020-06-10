@@ -97,38 +97,61 @@ const photoBooth = (function () {
     public.toggleNav = function () {
         $('#mySidenav').toggleClass('sidenav--open');
     }
-
+    var pid;
     public.startVideo = function () {
+        const data = {
+            play: "true"
+        };
+
         if (!navigator.mediaDevices) {
             return;
         }
 
-        const getMedia = (navigator.mediaDevices.getUserMedia || navigator.mediaDevices.webkitGetUserMedia || navigator.mediaDevices.mozGetUserMedia || false);
+        jQuery.post('api/takeVideo.php', data).done(function (result) {
+            console.log('Start webcam',result);
+            pid=result.pid;
+            const getMedia = (navigator.mediaDevices.getUserMedia || navigator.mediaDevices.webkitGetUserMedia || navigator.mediaDevices.mozGetUserMedia || false);
 
-        if (!getMedia) {
-            return;
-        }
+            if (!getMedia) {
+                console.log('No user media');
+                return;
+            }
 
-        if (config.previewCamFlipHorizontal) {
-            $('#video--view').addClass('flip-horizontal');
-        }
+            if (config.previewCamFlipHorizontal) {
+                $('#video--view').addClass('flip-horizontal');
+            }
 
-        getMedia.call(navigator.mediaDevices, webcamConstraints)
-            .then(function (stream) {
-                $('#video--view').show();
-                videoView.srcObject = stream;
-                public.stream = stream;
-            })
-            .catch(function (error) {
-                console.log('Could not get user media: ', error)
-            });
+            getMedia.call(navigator.mediaDevices, webcamConstraints)
+                .then(function (stream) {
+                    console.log('Success getting user media')
+                    $('#video--view').show();
+                    videoView.srcObject = stream;
+                    public.stream = stream;
+                })
+                .catch(function (error) {
+                    console.log('Could not get user media: ', error)
+                });
+        }).fail(function (xhr, status, result) {
+            console.log('Could not start webcam',result)
+        });
     }
 
-    public.stopVideo = function () {
+    public.stopVideoAndTakePic = function (data) {
         if (public.stream) {
-            const track = public.stream.getTracks()[0];
-            track.stop();
-            $('#video--view').hide();
+            const dataVideo = {
+                play: "false",
+                pid: pid
+            };
+
+            jQuery.post('api/takeVideo.php', dataVideo).done(function (result) {
+                console.log('Stop webcam',result)
+                const track = public.stream.getTracks()[0];
+                track.stop();
+                $('#video--view').hide();
+                public.callTakePicApi(data);
+            }).fail(function (xhr, status, result) {
+                console.log('Could not stop webcam',result)
+            });
         }
     }
 
@@ -166,18 +189,9 @@ const photoBooth = (function () {
             $('<p>').text(`${nextCollageNumber + 1} / ${config.collage_limit}`).appendTo('.cheese');
         }
 
-        if (config.previewFromCam && config.previewCamTakesPic && !public.stream && !config.dev) {
-            console.log('No preview by device cam available!');
-
-            public.errorPic({
-                error: 'No preview by device cam available!'
-            });
-
-        } else {
-            setTimeout(() => {
-                public.takePic(photoStyle);
-            }, config.cheese_time);
-        }
+        setTimeout(() => {
+            public.takePic(photoStyle);
+        }, config.cheese_time);
     }
 
     // take Picture
@@ -186,19 +200,10 @@ const photoBooth = (function () {
             console.log('Take Picture:' + photoStyle);
         }
 
-        if (config.previewFromCam) {
-            if (config.previewCamTakesPic && !config.dev) {
-                videoSensor.width = videoView.videoWidth;
-                videoSensor.height = videoView.videoHeight;
-                videoSensor.getContext('2d').drawImage(videoView, 0, 0);
-            }
-            public.stopVideo();
-        }
-
         const data = {
             filter: imgFilter,
             style: photoStyle,
-            canvasimg: videoSensor.toDataURL('image/jpeg'),
+            canvasimg: videoSensor.toDataURL('image/jpeg')
         };
 
         if (photoStyle === 'collage') {
@@ -206,6 +211,20 @@ const photoBooth = (function () {
             data.collageNumber = nextCollageNumber;
         }
 
+        if (config.previewFromCam) {
+            if (config.previewCamTakesPic && !config.dev) {
+                videoSensor.width = videoView.videoWidth;
+                videoSensor.height = videoView.videoHeight;
+                videoSensor.getContext('2d').drawImage(videoView, 0, 0);
+            }
+            public.stopVideoAndTakePic(data);
+        }else {
+            public.callTakePicApi(data);
+        }
+    }
+
+    public.callTakePicApi =function (data) {
+        console.log(data);
         jQuery.post('api/takePic.php', data).done(function (result) {
             console.log('took picture', result);
             $('.cheese').empty();
@@ -244,7 +263,7 @@ const photoBooth = (function () {
                 currentCollageFile = '';
                 nextCollageNumber = 0;
 
-                public.processPic(photoStyle, result);
+                public.processPic(data.photoStyle, result);
             }
 
         }).fail(function (xhr, status, result) {
